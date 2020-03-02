@@ -53,7 +53,7 @@ emi_agg = emi_data.groupby("Loan Id", as_index = False).agg({
                             "Investment Amount": np.mean,
                             "Rate %": np.mean,
                             "Tenure (months)": np.mean,
-                            "EMI Amount(INR)": np.sum,
+                            "EMI Amount(INR)": np.mean,
                             "Principal Amount(INR)": np.sum,
                             "Interest Amount(INR)": np.sum})
 
