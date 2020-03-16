@@ -3,12 +3,30 @@ Project: Analysing Faircent Portfolio performance
 Purpose: Calculating returns and other metrics
 Author: Srungeer Simha
 '''
-#%% Loading libraries
+#%% Loading libraries and defining functions
 
 import pandas as pd
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
+import scipy.optimize
+from datetime import datetime, date
+
+# Defining a function to calculate xirr
+
+def calc_xnpv(rate, values, dates):
+
+    if rate <= -1.0:
+        return float('inf')
+    d0 = dates[0]    # or min(dates)
+    return sum([ vi / (1.0 + rate)**((di - d0).days / 365.0) for vi, di in zip(values, dates)])
+
+def calc_xirr(values, dates):
+
+    try:
+        return scipy.optimize.newton(lambda r: calc_xnpv(r, values, dates), 0.0)
+    except RuntimeError:    # Failed to converge?
+        return scipy.optimize.brentq(lambda r: calc_xnpv(r, values, dates), -1.0, 1e10)
 
 #%% Loading data
 
@@ -16,17 +34,26 @@ cur_dir = "C:\\Apps\\Srungeer\\Documents\\Personal\\Personal Finance\\Faircent\\
 emi_agg = pd.read_excel(cur_dir + "EMI_status.xlsx")
 account_details = pd.read_excel(cur_dir + "account_details.xlsx")
 
-#%% Calculating returns
+#%% Calculating portfolio value
 
-## Calculating portfolio value
+'''
+Portfolio Value = Money recieved till date (EMI + fines) + present value of future payments
+'''
 
-# Amount received till date
+## Amount received till date
 amount_received = account_details.loc[account_details["Category"] == "Payment", "Credit"].sum()
 
-# Remaining payments
-remaining_loans = emi_agg[emi_agg["Status"] != "Closed"]
+## Future Cashflow
+'''
+future cashflow = PV(future payments)*(1-default rate)
+- Future cashflows to be discounted at 8% and risked using portfolio default rate
+'''
+
+# EMI amount pending
+remaining_loans = emi_agg[(emi_agg["Status"] != "Closed") & (emi_agg["Status"] != "Default")]
 remaining_loans["pending"] = remaining_loans["Tenure (months)"] - (remaining_loans["due"] + remaining_loans["paid"])
 
+# Future cashflow
 cashflow = []
 for loan in remaining_loans["Loan Id"]:
     loan_details = remaining_loans[remaining_loans["Loan Id"] == loan]
@@ -46,26 +73,33 @@ future_cashflow = cashflow["PV"].sum()
 portfolio_value = amount_received + future_cashflow*(1-default_rate)
 unrisked_portfolio_value = amount_received + future_cashflow
 
-## Calculating return metrics
+#%% Calculating return metrics
 
-# Calculating bad loans amount
+'''
+Return metrics used - ROI and XIRR
+ROI = portfolio value - money added
+XIRR = xirr(values dates)
+'''
+
+## Calculating bad loans amount
 default_loans = emi_agg.loc[emi_agg["Status"] == "Default"]
 default_amount = default_loans["Investment Amount"].sum() - (default_loans["paid"]*default_loans["EMI Amount(INR)"]).sum()
 
-# Amount transferred
+## ROI
 amount_added = account_details.loc[account_details["Category"] == "Recharge", "Credit"].sum()
+returns = portfolio_value - amount_added
 
-# Net returns
-returns = portfolio_value - amount_added - default_amount
-
-# Return on investment
 roi = returns/amount_added
 
-# CAGR
-n = (pd.datetime.now() - account_details["Date"].min()).days/365
+## XIRR
 
-cagr = np.power(portfolio_value/amount_added, 1/n) - 1
-cagr_unrisked = np.power(unrisked_portfolio_value/amount_added, 1/n) - 1
+dates = list(account_details.loc[account_details["Category"] == "Recharge", "Date"])
+dates.append(account_details["Date"].max())
+
+values = list(account_details.loc[account_details["Category"] == "Recharge", "Credit"])
+values.append(-portfolio_value)
+
+xirr = calc_xirr(values, dates)
 
 #%% Plots
 
@@ -117,3 +151,12 @@ invested_amount = emi_agg["Investment Amount"].sum()
 undiscounted_unrisked_portfolio_value = np.sum(emi_agg["EMI Amount(INR)"]*emi_agg["Tenure (months)"])
 undiscounted_future_cashflow = cashflow["MOD"].sum()
 undiscounted_portfolio_value = amount_received + undiscounted_future_cashflow*(1-default_rate)
+
+## CAGR
+'''
+CAGR is incorrect as multiple investments have been made in time
+'''
+n = (pd.datetime.now() - account_details["Date"].min()).days/365
+
+cagr = np.power(portfolio_value/amount_added, 1/n) - 1
+cagr_unrisked = np.power(unrisked_portfolio_value/amount_added, 1/n) - 1
